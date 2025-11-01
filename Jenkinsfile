@@ -2,20 +2,20 @@ pipeline {
     agent any
 
     environment {
-        // ----- ACR Configuration -----
+        // ----- Azure Container Registry -----
         ACR_NAME = 'aswathregistry'
         ACR_LOGIN_SERVER = 'aswathregistry.azurecr.io'
         IMAGE_NAME = 'demoapp'
 
-        // ----- Azure Configuration -----
+        // ----- Azure Settings -----
         RESOURCE_GROUP = 'jenkins-rg'
         CONTAINER_NAME = 'demoapp-container'
         LOCATION = 'southindia'
-        DNS_NAME_LABEL = 'aswath-demoapp2004-final'
+        DNS_NAME_LABEL = 'aswath-demoapp2004-final'  // must be unique globally
 
         // ----- Jenkins Credentials -----
-        CREDS = credentials('azure-acr')     // ACR username/password stored in Jenkins
-        AZURE_SP = credentials('azure-sp')   // Azure Service Principal JSON stored in Jenkins
+        CREDS = credentials('azure-acr')     // ACR username/password
+        AZURE_SP = credentials('azure-sp')   // Azure Service Principal JSON
     }
 
     stages {
@@ -35,7 +35,7 @@ pipeline {
 
         stage('Login to ACR') {
             steps {
-                echo "🔐 Logging into Azure Container Registry..."
+                echo "🔐 Logging into ACR..."
                 withCredentials([usernamePassword(credentialsId: 'azure-acr', usernameVariable: 'USR', passwordVariable: 'PASS')]) {
                     sh """
                         echo \$PASS | docker login ${ACR_LOGIN_SERVER} -u \$USR --password-stdin
@@ -55,10 +55,7 @@ pipeline {
             steps {
                 echo "🔑 Logging into Azure..."
                 script {
-                    // Write service principal JSON to a temporary file
                     writeFile file: 'azure_sp.json', text: "${AZURE_SP}"
-
-                    // Login to Azure
                     sh '''
                         az login --service-principal \
                             --username $(jq -r .clientId azure_sp.json) \
@@ -76,6 +73,14 @@ pipeline {
                 echo "🚀 Deploying container to Azure..."
                 script {
                     sh '''
+                        echo "Checking if container already exists..."
+                        if az container show --resource-group ${RESOURCE_GROUP} --name ${CONTAINER_NAME} &> /dev/null; then
+                            echo "Container exists — deleting old one..."
+                            az container delete --resource-group ${RESOURCE_GROUP} --name ${CONTAINER_NAME} --yes
+                            sleep 10
+                        fi
+
+                        echo "Creating new container..."
                         az container create \
                             --resource-group ${RESOURCE_GROUP} \
                             --name ${CONTAINER_NAME} \
@@ -87,8 +92,7 @@ pipeline {
                             --dns-name-label ${DNS_NAME_LABEL} \
                             --ports 80 \
                             --location ${LOCATION} \
-                            --restart-policy Always || \
-                        az container restart --resource-group ${RESOURCE_GROUP} --name ${CONTAINER_NAME}
+                            --restart-policy Always
                     '''
                 }
             }
@@ -98,10 +102,10 @@ pipeline {
     post {
         success {
             echo "✅ Deployment successful!"
-            echo "🌐 Your app is live at: http://${DNS_NAME_LABEL}.${LOCATION}.azurecontainer.io"
+            echo "🌐 Access your app: http://${DNS_NAME_LABEL}.${LOCATION}.azurecontainer.io"
         }
         failure {
-            echo "❌ Deployment failed! Check the Jenkins console logs for details."
+            echo "❌ Deployment failed! Check Jenkins logs for details."
         }
     }
 }
