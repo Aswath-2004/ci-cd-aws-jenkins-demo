@@ -2,26 +2,26 @@ pipeline {
     agent any
 
     environment {
-        // ----- Azure Container Registry -----
+        // ===== ACR DETAILS =====
         ACR_NAME = 'aswathregistry'
         ACR_LOGIN_SERVER = 'aswathregistry.azurecr.io'
         IMAGE_NAME = 'demoapp'
 
-        // ----- Azure Settings -----
+        // ===== AZURE DEPLOYMENT DETAILS =====
         RESOURCE_GROUP = 'jenkins-rg'
         CONTAINER_NAME = 'demoapp-container'
         LOCATION = 'southindia'
-        DNS_NAME_LABEL = 'aswath-demoapp2004-final'  // must be unique globally
+        DNS_NAME_LABEL = 'aswath-demoapp2004-final8'  // must be unique globally
 
-        // ----- Jenkins Credentials -----
-        CREDS = credentials('azure-acr')     // ACR username/password
-        AZURE_SP = credentials('azure-sp')   // Azure Service Principal JSON
+        // ===== JENKINS CREDENTIALS =====
+        CREDS = credentials('azure-acr')   // ACR username/password
+        AZURE_SP = credentials('azure-sp') // Azure Service Principal JSON
     }
 
     stages {
         stage('Checkout Code') {
             steps {
-                echo "📥 Checking out source code..."
+                echo "📦 Checking out latest code from GitHub..."
                 git branch: 'main', url: 'https://github.com/Aswath-2004/ci-cd-aws-jenkins-demo.git'
             }
         }
@@ -35,11 +35,11 @@ pipeline {
 
         stage('Login to ACR') {
             steps {
-                echo "🔐 Logging into ACR..."
+                echo "🔐 Logging in to Azure Container Registry..."
                 withCredentials([usernamePassword(credentialsId: 'azure-acr', usernameVariable: 'USR', passwordVariable: 'PASS')]) {
-                    sh """
-                        echo \$PASS | docker login ${ACR_LOGIN_SERVER} -u \$USR --password-stdin
-                    """
+                    sh '''
+                        echo $PASS | docker login ${ACR_LOGIN_SERVER} -u $USR --password-stdin
+                    '''
                 }
             }
         }
@@ -55,7 +55,10 @@ pipeline {
             steps {
                 echo "🔑 Logging into Azure..."
                 script {
+                    // Save the Azure SP JSON to a temporary file
                     writeFile file: 'azure_sp.json', text: "${AZURE_SP}"
+
+                    // Use jq to extract values and log in
                     sh '''
                         az login --service-principal \
                             --username $(jq -r .clientId azure_sp.json) \
@@ -75,12 +78,12 @@ pipeline {
                     sh '''
                         echo "Checking if container already exists..."
                         if az container show --resource-group ${RESOURCE_GROUP} --name ${CONTAINER_NAME} &> /dev/null; then
-                            echo "Container exists — deleting old one..."
+                            echo "Container already exists — deleting old version..."
                             az container delete --resource-group ${RESOURCE_GROUP} --name ${CONTAINER_NAME} --yes
                             sleep 10
                         fi
 
-                        echo "Creating new container..."
+                        echo "Creating new container with latest image..."
                         az container create \
                             --resource-group ${RESOURCE_GROUP} \
                             --name ${CONTAINER_NAME} \
@@ -102,7 +105,7 @@ pipeline {
     post {
         success {
             echo "✅ Deployment successful!"
-            echo "🌐 Access your app: http://${DNS_NAME_LABEL}.${LOCATION}.azurecontainer.io"
+            echo "🌍 Access your app at: http://${DNS_NAME_LABEL}.${LOCATION}.azurecontainer.io"
         }
         failure {
             echo "❌ Deployment failed! Check Jenkins logs for details."
