@@ -11,7 +11,7 @@ pipeline {
         RESOURCE_GROUP = 'jenkins-rg'
         CONTAINER_NAME = 'demoapp-container'
         LOCATION = 'southindia'
-        DNS_NAME_LABEL = 'aswath-demoapp2004-final8'  // must be unique globally
+        DNS_NAME_LABEL = 'aswath-demoapp2004-final'  // must be globally unique
 
         // ===== JENKINS CREDENTIALS =====
         CREDS = credentials('azure-acr')   // ACR username/password
@@ -35,7 +35,7 @@ pipeline {
 
         stage('Login to ACR') {
             steps {
-                echo "🔐 Logging in to Azure Container Registry..."
+                echo "🔐 Logging into Azure Container Registry..."
                 withCredentials([usernamePassword(credentialsId: 'azure-acr', usernameVariable: 'USR', passwordVariable: 'PASS')]) {
                     sh '''
                         echo $PASS | docker login ${ACR_LOGIN_SERVER} -u $USR --password-stdin
@@ -55,10 +55,8 @@ pipeline {
             steps {
                 echo "🔑 Logging into Azure..."
                 script {
-                    // Save the Azure SP JSON to a temporary file
                     writeFile file: 'azure_sp.json', text: "${AZURE_SP}"
 
-                    // Use jq to extract values and log in
                     sh '''
                         az login --service-principal \
                             --username $(jq -r .clientId azure_sp.json) \
@@ -78,7 +76,7 @@ pipeline {
                     sh '''
                         echo "Checking if container already exists..."
                         if az container show --resource-group ${RESOURCE_GROUP} --name ${CONTAINER_NAME} &> /dev/null; then
-                            echo "Container already exists — deleting old version..."
+                            echo "Container exists. Updating image..."
                             az container delete --resource-group ${RESOURCE_GROUP} --name ${CONTAINER_NAME} --yes
                             sleep 10
                         fi
