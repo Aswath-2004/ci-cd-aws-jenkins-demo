@@ -7,8 +7,10 @@ pipeline {
         IMAGE_NAME = 'demoapp'
         RESOURCE_GROUP = 'jenkins-rg'
         CONTAINER_NAME = 'demoapp-container'
-        DNS_NAME_LABEL = 'aswath-demoapp2004-v7'
         LOCATION = 'southindia'
+        DNS_NAME_LABEL = 'aswath-demoapp2004-v7'
+        CREDS = credentials('azure-acr')    // your ACR username-password credential ID
+        AZURE_CREDS = credentials('azure-sp') // your Azure Service Principal JSON secret
     }
 
     stages {
@@ -26,45 +28,63 @@ pipeline {
             }
         }
 
-        stage('Login to ACR & Push Image') {
+        stage('Login & Push to ACR') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'azure-acr', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                    script {
-                        sh """
-                        echo "Logging into ACR..."
-                        docker login ${ACR_LOGIN_SERVER} -u ${USER} -p ${PASS}
+                script {
+                    sh """
+                        echo ${CREDS_PSW} | docker login ${ACR_LOGIN_SERVER} -u ${CREDS_USR} --password-stdin
                         docker push ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest
-                        """
-                    }
+                    """
+                }
+            }
+        }
+
+        stage('Login to Azure') {
+            steps {
+                script {
+                    // write service principal JSON to a temp file and login
+                    writeFile file: 'azure_sp.json', text: "${AZURE_CREDS}"
+                    sh '''
+                        az login --service-principal \
+                          --username $(jq -r .clientId azure_sp.json) \
+                          --password $(jq -r .clientSecret azure_sp.json) \
+                          --tenant $(jq -r .tenantId azure_sp.json)
+                        az account set --subscription $(jq -r .subscriptionId azure_sp.json)
+                    '''
                 }
             }
         }
 
         stage('Deploy to Azure Container Instance') {
             steps {
-                withCredentials([string(credentialsId: 'azure-service-principal', variable: 'AZURE_CREDENTIALS')]) {
-                    script {
-                        echo "Logging into Azure using Service Principal..."
-                        sh 'echo $AZURE_CREDENTIALS > azureAuth.json'
-                        sh 'az login --service-principal --username $(jq -r .clientId azureAuth.json) --password $(jq -r .clientSecret azureAuth.json) --tenant $(jq -r .tenantId azureAuth.json)'
-                        
-                        echo "Deploying latest image to Azure Container Instance..."
-                        sh """
-                        az container delete --name ${CONTAINER_NAME} --resource-group ${RESOURCE_GROUP} --yes || true
+                script {
+                    // deploy or update container instance
+                    sh '''
                         az container create \
-                            --resource-group ${RESOURCE_GROUP} \
-                            --name ${CONTAINER_NAME} \
-                            --image ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest \
-                            --cpu 1 --memory 1 \
-                            --os-type Linux \
-                            --registry-login-server ${ACR_LOGIN_SERVER} \
-                            --dns-name-label ${DNS_NAME_LABEL} \
-                            --ports 80 \
-                            --location ${LOCATION}
-                        """
-                    }
+                          --resource-group ${RESOURCE_GROUP} \
+                          --name ${CONTAINER_NAME} \
+                          --image ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest \
+                          --cpu 1 --memory 1 \
+                          --registry-login-server ${ACR_LOGIN_SERVER} \
+                          --registry-username ${CREDS_USR} \
+                          --registry-password ${CREDS_PSW} \
+                          --dns-name-label ${DNS_NAME_LABEL} \
+                          --ports 80 \
+                          --location ${LOCATION} \
+                          --restart-policy Always || \
+                        az container restart --resource-group ${RESOURCE_GROUP} --name ${CONTAINER_NAME}
+                    '''
                 }
             }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ Deployment successful! Access your app at: http://${DNS_NAME_LABEL}.${LOCATION}.azurecontainer.io"
+        }
+        failure {
+            echo "❌ Deployment failed! Check Jenkins logs for errors."
         }
     }
 }
