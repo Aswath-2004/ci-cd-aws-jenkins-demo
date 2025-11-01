@@ -42,20 +42,28 @@ pipeline {
             }
         }
 
+        // 🔹 NEW: Azure Auto Deploy using Service Principal 🔹
         stage('Deploy to Azure') {
             steps {
-                withCredentials([string(credentialsId: 'azure-service-principal', variable: 'AZURE_CREDENTIALS_JSON')]) {
+                withCredentials([string(credentialsId: 'azure-service-principal', variable: 'AZURE_CREDENTIALS')]) {
                     script {
-                        writeFile file: 'azure-credentials.json', text: "${AZURE_CREDENTIALS_JSON}"
-                        echo 'Logging into Azure...'
-                        sh '''
-                        az login --service-principal --username $(jq -r .clientId azure-credentials.json) \
-                            --password $(jq -r .clientSecret azure-credentials.json) \
-                            --tenant $(jq -r .tenantId azure-credentials.json)
+                        echo 'Logging into Azure and deploying latest image...'
 
-                        echo "Deploying container to Azure..."
+                        // Write the JSON creds to a temp file
+                        writeFile file: 'azureAuth.json', text: "${AZURE_CREDENTIALS}"
+
+                        // Login to Azure using service principal
+                        sh """
+                        az login --service-principal -u $(jq -r .clientId azureAuth.json) \
+                                 -p $(jq -r .clientSecret azureAuth.json) \
+                                 --tenant $(jq -r .tenantId azureAuth.json)
+
+                        az account set --subscription $(jq -r .subscriptionId azureAuth.json)
+
+                        # Delete existing container if any
                         az container delete --name ${CONTAINER_NAME} --resource-group ${RESOURCE_GROUP} --yes || true
 
+                        # Deploy new container from ACR
                         az container create \
                             --resource-group ${RESOURCE_GROUP} \
                             --name ${CONTAINER_NAME} \
@@ -63,12 +71,12 @@ pipeline {
                             --cpu 1 --memory 1 \
                             --os-type Linux \
                             --registry-login-server ${ACR_LOGIN_SERVER} \
-                            --registry-username ${USER} \
-                            --registry-password ${PASS} \
+                            --registry-username ${ACR_NAME} \
+                            --registry-password $(jq -r .clientSecret azureAuth.json) \
                             --dns-name-label ${DNS_NAME_LABEL} \
                             --ports 80 \
                             --location ${LOCATION}
-                        '''
+                        """
                     }
                 }
             }
