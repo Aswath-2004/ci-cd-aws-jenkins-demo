@@ -1,11 +1,8 @@
-const http = require('http');
-const port = 80;
+// app.js
+const express = require('express');
+const app = express();
+const PORT = process.env.PORT || 80;
 
-const server = http.createServer((req, res) => {
-  res.writeHead(200, {'Content-Type': 'text/plain'});
-  res.end('Hello from CI/CD demo on Azure!');
-});
+app.get('/', (req, res) => res.send('Hello from CI/CD demo on Azure!'));
 
-server.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-});
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
