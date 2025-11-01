@@ -2,17 +2,16 @@ pipeline {
     agent any
 
     environment {
-        ACR_NAME           = 'aswathregistry'
-        ACR_LOGIN_SERVER   = 'aswathregistry.azurecr.io'
-        IMAGE_NAME         = 'demoapp'
-        RESOURCE_GROUP     = 'jenkins-rg'
-        CONTAINER_NAME     = 'demoapp-container'
-        DNS_NAME_LABEL     = 'aswath-demoapp2004-v7'
-        LOCATION           = 'southindia'
+        ACR_NAME         = 'aswathregistry'
+        ACR_LOGIN_SERVER = 'aswathregistry.azurecr.io'
+        IMAGE_NAME       = 'demoapp'
+        RESOURCE_GROUP   = 'jenkins-rg'
+        CONTAINER_NAME   = 'demoapp-container'
+        DNS_NAME_LABEL   = 'aswath-demoapp2004-v7'
+        LOCATION         = 'southindia'
     }
 
     stages {
-
         stage('Checkout Code') {
             steps {
                 echo '🔹 Checking out latest code from GitHub...'
@@ -38,7 +37,7 @@ pipeline {
 
         stage('Push to ACR') {
             steps {
-                echo '🚀 Pushing Docker image to Azure Container Registry...'
+                echo '🚀 Pushing Docker image to ACR...'
                 sh "docker push ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest"
             }
         }
@@ -50,7 +49,7 @@ pipeline {
                     sh '''
                         echo "➡️ Deleting old container (if exists)..."
                         az container delete --name ${CONTAINER_NAME} --resource-group ${RESOURCE_GROUP} --yes || true
-                        
+
                         echo "🚢 Creating new container from latest image..."
                         az container create \
                             --resource-group ${RESOURCE_GROUP} \
@@ -64,7 +63,7 @@ pipeline {
                             --dns-name-label ${DNS_NAME_LABEL} \
                             --ports 80 \
                             --location ${LOCATION}
-                        
+
                         echo "✅ Deployment complete!"
                     '''
                 }
@@ -74,10 +73,10 @@ pipeline {
 
     post {
         success {
-            echo "🎉 CI/CD pipeline executed successfully: Code built, pushed to ACR, and deployed to Azure Container Instance!"
+            echo "🎉 CI/CD pipeline executed successfully — deployed to Azure!"
         }
         failure {
-            echo "❌ Pipeline failed — check Jenkins logs for errors."
+            echo "❌ Pipeline failed. Check Jenkins logs for details."
         }
     }
 }
