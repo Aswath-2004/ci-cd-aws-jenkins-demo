@@ -2,55 +2,60 @@ pipeline {
     agent any
 
     environment {
-        ACR_NAME         = 'aswathregistry'
+        ACR_NAME = 'aswathregistry'
         ACR_LOGIN_SERVER = 'aswathregistry.azurecr.io'
-        IMAGE_NAME       = 'demoapp'
-        RESOURCE_GROUP   = 'jenkins-rg'
-        CONTAINER_NAME   = 'demoapp-container'
-        DNS_NAME_LABEL   = 'aswath-demoapp2004-v7'
-        LOCATION         = 'southindia'
+        IMAGE_NAME = 'demoapp'
+        RESOURCE_GROUP = 'jenkins-rg'
+        CONTAINER_NAME = 'demoapp-container'
+        DNS_NAME_LABEL = 'aswath-demoapp2004-v7'
+        LOCATION = 'southindia'
     }
 
     stages {
         stage('Checkout Code') {
             steps {
-                echo '🔹 Checking out latest code from GitHub...'
                 git branch: 'main', url: 'https://github.com/Aswath-2004/ci-cd-aws-jenkins-demo.git'
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                echo '🐳 Building Docker image...'
-                sh "docker build -t ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest ."
+                script {
+                    sh "docker build -t ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest ."
+                }
             }
         }
 
         stage('Login to ACR') {
             steps {
-                echo '🔐 Logging in to Azure Container Registry...'
                 withCredentials([usernamePassword(credentialsId: 'acr-credentials', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                    sh 'echo $PASS | docker login ${ACR_LOGIN_SERVER} -u $USER --password-stdin'
+                    sh "docker login ${ACR_LOGIN_SERVER} -u ${USER} -p ${PASS}"
                 }
             }
         }
 
         stage('Push to ACR') {
             steps {
-                echo '🚀 Pushing Docker image to ACR...'
-                sh "docker push ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest"
+                script {
+                    sh "docker push ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest"
+                }
             }
         }
 
-        stage('Deploy to Azure Container Instance') {
+        stage('Deploy to Azure') {
             steps {
-                echo '🌐 Deploying latest image to Azure Container Instance...'
-                withCredentials([usernamePassword(credentialsId: 'acr-credentials', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                    sh '''
-                        echo "➡️ Deleting old container (if exists)..."
+                withCredentials([string(credentialsId: 'azure-service-principal', variable: 'AZURE_CREDENTIALS_JSON')]) {
+                    script {
+                        writeFile file: 'azure-credentials.json', text: "${AZURE_CREDENTIALS_JSON}"
+                        echo 'Logging into Azure...'
+                        sh '''
+                        az login --service-principal --username $(jq -r .clientId azure-credentials.json) \
+                            --password $(jq -r .clientSecret azure-credentials.json) \
+                            --tenant $(jq -r .tenantId azure-credentials.json)
+
+                        echo "Deploying container to Azure..."
                         az container delete --name ${CONTAINER_NAME} --resource-group ${RESOURCE_GROUP} --yes || true
 
-                        echo "🚢 Creating new container from latest image..."
                         az container create \
                             --resource-group ${RESOURCE_GROUP} \
                             --name ${CONTAINER_NAME} \
@@ -58,25 +63,15 @@ pipeline {
                             --cpu 1 --memory 1 \
                             --os-type Linux \
                             --registry-login-server ${ACR_LOGIN_SERVER} \
-                            --registry-username $USER \
-                            --registry-password $PASS \
+                            --registry-username ${USER} \
+                            --registry-password ${PASS} \
                             --dns-name-label ${DNS_NAME_LABEL} \
                             --ports 80 \
                             --location ${LOCATION}
-
-                        echo "✅ Deployment complete!"
-                    '''
+                        '''
+                    }
                 }
             }
-        }
-    }
-
-    post {
-        success {
-            echo "🎉 CI/CD pipeline executed successfully — deployed to Azure!"
-        }
-        failure {
-            echo "❌ Pipeline failed. Check Jenkins logs for details."
         }
     }
 }
