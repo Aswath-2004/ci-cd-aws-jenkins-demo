@@ -2,12 +2,11 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = 'demoapp'
-        ACR_NAME = 'aswathregistry'
-        RESOURCE_GROUP = 'jenkins-rg'
-        CONTAINER_NAME = 'demoapp-container'
-        LOCATION = 'southindia'
-        DNS_LABEL = 'aswath-demoapp2004-v7'
+        ACR_NAME = "aswathregistry"
+        IMAGE_NAME = "demoapp"
+        RESOURCE_GROUP = "jenkins-rg"
+        ACI_NAME = "demoapp-container"
+        LOCATION = "eastus"
     }
 
     stages {
@@ -20,7 +19,7 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    sh 'docker build -t ${ACR_NAME}.azurecr.io/${IMAGE_NAME}:latest .'
+                    sh "docker build -t ${ACR_NAME}.azurecr.io/${IMAGE_NAME}:latest ."
                 }
             }
         }
@@ -30,8 +29,8 @@ pipeline {
                 withCredentials([usernamePassword(credentialsId: 'acr-credentials', usernameVariable: 'ACR_USER', passwordVariable: 'ACR_PASS')]) {
                     script {
                         sh """
-                        echo \$ACR_PASS | docker login \$ACR_NAME.azurecr.io -u \$ACR_USER --password-stdin
-                        docker push \$ACR_NAME.azurecr.io/\$IMAGE_NAME:latest
+                            echo $ACR_PASS | docker login ${ACR_NAME}.azurecr.io -u $ACR_USER --password-stdin
+                            docker push ${ACR_NAME}.azurecr.io/${IMAGE_NAME}:latest
                         """
                     }
                 }
@@ -42,12 +41,16 @@ pipeline {
             steps {
                 withCredentials([file(credentialsId: 'azure-sp', variable: 'AZURE_SP_FILE')]) {
                     script {
-                        def sp = readJSON file: AZURE_SP_FILE
                         sh """
-                        az login --service-principal \
-                            -u \${sp.clientId} \
-                            -p \${sp.clientSecret} \
-                            --tenant \${sp.tenantId}
+                            echo "🔑 Logging into Azure..."
+                            cat $AZURE_SP_FILE | jq -r '.clientId, .clientSecret, .tenantId, .subscriptionId' | {
+                                read CLIENT_ID
+                                read CLIENT_SECRET
+                                read TENANT_ID
+                                read SUBSCRIPTION_ID
+                                az login --service-principal --username "$CLIENT_ID" --password "$CLIENT_SECRET" --tenant "$TENANT_ID"
+                                az account set --subscription "$SUBSCRIPTION_ID"
+                            }
                         """
                     }
                 }
@@ -58,24 +61,20 @@ pipeline {
             steps {
                 script {
                     sh """
-                    az container create \
-                      --resource-group \$RESOURCE_GROUP \
-                      --name \$CONTAINER_NAME \
-                      --image \$ACR_NAME.azurecr.io/\$IMAGE_NAME:latest \
-                      --cpu 1 --memory 1 \
-                      --registry-login-server \$ACR_NAME.azurecr.io \
-                      --registry-username \$ACR_NAME \
-                      --registry-password "\$(az acr credential show --name \$ACR_NAME --query "passwords[0].value" -o tsv)" \
-                      --ports 80 \
-                      --os-type Linux \
-                      --restart-policy Always \
-                      --dns-name-label \$DNS_LABEL \
-                      --location \$LOCATION \
-                      --ip-address Public --query "{FQDN:ipAddress.fqdn, IP:ipAddress.ip}" -o table || \
-                      az container update \
-                      --resource-group \$RESOURCE_GROUP \
-                      --name \$CONTAINER_NAME \
-                      --image \$ACR_NAME.azurecr.io/\$IMAGE_NAME:latest
+                        echo "🚀 Deploying container to Azure..."
+                        az container create \
+                            --resource-group ${RESOURCE_GROUP} \
+                            --name ${ACI_NAME} \
+                            --image ${ACR_NAME}.azurecr.io/${IMAGE_NAME}:latest \
+                            --cpu 1 \
+                            --memory 1 \
+                            --registry-login-server ${ACR_NAME}.azurecr.io \
+                            --registry-username ${ACR_NAME} \
+                            --registry-password $ACR_PASS \
+                            --dns-name-label demoapp-${BUILD_NUMBER} \
+                            --ports 80 \
+                            --location ${LOCATION} \
+                            --restart-policy Always --query ipAddress.fqdn
                     """
                 }
             }
@@ -84,10 +83,10 @@ pipeline {
 
     post {
         success {
-            echo '✅ Deployment successful! Your app is live.'
+            echo "✅ Deployment successful!"
         }
         failure {
-            echo '❌ Deployment failed! Check Jenkins logs for details.'
+            echo "❌ Deployment failed! Check Jenkins logs for details."
         }
     }
 }
