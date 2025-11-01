@@ -27,7 +27,7 @@ pipeline {
             }
         }
 
-        stage('Login to Azure Container Registry') {
+        stage('Login to ACR') {
             steps {
                 echo '🔐 Logging in to Azure Container Registry...'
                 withCredentials([usernamePassword(credentialsId: 'acr-credentials', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
@@ -36,7 +36,7 @@ pipeline {
             }
         }
 
-        stage('Push Image to ACR') {
+        stage('Push to ACR') {
             steps {
                 echo '🚀 Pushing Docker image to Azure Container Registry...'
                 sh "docker push ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest"
@@ -74,10 +74,10 @@ pipeline {
 
     post {
         success {
-            echo "🎉 Build, push, and deploy pipeline completed successfully!"
+            echo "🎉 CI/CD pipeline executed successfully: Code built, pushed to ACR, and deployed to Azure Container Instance!"
         }
         failure {
-            echo "❌ Pipeline failed — check Jenkins logs for details."
+            echo "❌ Pipeline failed — check Jenkins logs for errors."
         }
     }
 }
