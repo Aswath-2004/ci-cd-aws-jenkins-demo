@@ -9,11 +9,14 @@ pipeline {
         CONTAINER_NAME = 'demoapp-container'
         LOCATION = 'southindia'
         DNS_NAME_LABEL = 'aswath-demoapp2004-v7'
-        CREDS = credentials('azure-acr')    // your ACR username-password credential ID
-        AZURE_CREDS = credentials('azure-sp') // your Azure Service Principal JSON secret
+
+        // Jenkins credentials
+        CREDS = credentials('azure-acr')                    // ACR username/password
+        AZURE_SP = credentials('azure-service-principal')    // Azure Service Principal JSON
     }
 
     stages {
+
         stage('Checkout Code') {
             steps {
                 git branch: 'main', url: 'https://github.com/Aswath-2004/ci-cd-aws-jenkins-demo.git'
@@ -28,7 +31,7 @@ pipeline {
             }
         }
 
-        stage('Login & Push to ACR') {
+        stage('Push Docker Image to ACR') {
             steps {
                 script {
                     sh """
@@ -39,16 +42,19 @@ pipeline {
             }
         }
 
-        stage('Login to Azure') {
+        stage('Login to Azure using Service Principal') {
             steps {
                 script {
-                    // write service principal JSON to a temp file and login
-                    writeFile file: 'azure_sp.json', text: "${AZURE_CREDS}"
+                    // Write SP JSON to a file for parsing
+                    writeFile file: 'azure_sp.json', text: "${AZURE_SP}"
+
+                    // Azure login and set subscription
                     sh '''
                         az login --service-principal \
-                          --username $(jq -r .clientId azure_sp.json) \
-                          --password $(jq -r .clientSecret azure_sp.json) \
-                          --tenant $(jq -r .tenantId azure_sp.json)
+                            --username $(jq -r .clientId azure_sp.json) \
+                            --password $(jq -r .clientSecret azure_sp.json) \
+                            --tenant $(jq -r .tenantId azure_sp.json)
+
                         az account set --subscription $(jq -r .subscriptionId azure_sp.json)
                     '''
                 }
@@ -58,20 +64,19 @@ pipeline {
         stage('Deploy to Azure Container Instance') {
             steps {
                 script {
-                    // deploy or update container instance
                     sh '''
                         az container create \
-                          --resource-group ${RESOURCE_GROUP} \
-                          --name ${CONTAINER_NAME} \
-                          --image ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest \
-                          --cpu 1 --memory 1 \
-                          --registry-login-server ${ACR_LOGIN_SERVER} \
-                          --registry-username ${CREDS_USR} \
-                          --registry-password ${CREDS_PSW} \
-                          --dns-name-label ${DNS_NAME_LABEL} \
-                          --ports 80 \
-                          --location ${LOCATION} \
-                          --restart-policy Always || \
+                            --resource-group ${RESOURCE_GROUP} \
+                            --name ${CONTAINER_NAME} \
+                            --image ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest \
+                            --cpu 1 --memory 1 \
+                            --registry-login-server ${ACR_LOGIN_SERVER} \
+                            --registry-username ${CREDS_USR} \
+                            --registry-password ${CREDS_PSW} \
+                            --dns-name-label ${DNS_NAME_LABEL} \
+                            --ports 80 \
+                            --location ${LOCATION} \
+                            --restart-policy Always || \
                         az container restart --resource-group ${RESOURCE_GROUP} --name ${CONTAINER_NAME}
                     '''
                 }
@@ -81,10 +86,11 @@ pipeline {
 
     post {
         success {
-            echo "✅ Deployment successful! Access your app at: http://${DNS_NAME_LABEL}.${LOCATION}.azurecontainer.io"
+            echo "✅ Deployment successful!"
+            echo "🌐 Access your app: http://${DNS_NAME_LABEL}.${LOCATION}.azurecontainer.io"
         }
         failure {
-            echo "❌ Deployment failed! Check Jenkins logs for errors."
+            echo "❌ Deployment failed! Check Jenkins logs for details."
         }
     }
 }
