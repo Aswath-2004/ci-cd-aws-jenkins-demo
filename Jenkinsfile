@@ -11,12 +11,11 @@ pipeline {
         DNS_NAME_LABEL = 'aswath-demoapp2004-v7'
 
         // Jenkins credentials
-        CREDS = credentials('azure-acr')                    // ACR username/password
-        AZURE_SP = credentials('azure-service-principal')    // Azure Service Principal JSON
+        CREDS = credentials('azure-acr')    // ACR username/password
+        AZURE_SP = credentials('azure-sp')  // Azure Service Principal JSON
     }
 
     stages {
-
         stage('Checkout Code') {
             steps {
                 git branch: 'main', url: 'https://github.com/Aswath-2004/ci-cd-aws-jenkins-demo.git'
@@ -26,6 +25,7 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
+                    echo "🛠️ Building Docker image..."
                     sh "docker build -t ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest ."
                 }
             }
@@ -34,6 +34,7 @@ pipeline {
         stage('Push Docker Image to ACR') {
             steps {
                 script {
+                    echo "📤 Pushing image to Azure Container Registry..."
                     sh """
                         echo ${CREDS_PSW} | docker login ${ACR_LOGIN_SERVER} -u ${CREDS_USR} --password-stdin
                         docker push ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest
@@ -45,10 +46,8 @@ pipeline {
         stage('Login to Azure using Service Principal') {
             steps {
                 script {
-                    // Write SP JSON to a file for parsing
+                    echo "🔐 Logging into Azure using Service Principal..."
                     writeFile file: 'azure_sp.json', text: "${AZURE_SP}"
-
-                    // Azure login and set subscription
                     sh '''
                         az login --service-principal \
                             --username $(jq -r .clientId azure_sp.json) \
@@ -64,17 +63,17 @@ pipeline {
         stage('Deploy or Update Azure Container Instance') {
             steps {
                 script {
-                    // This stage will update if ACI exists, or create a new one if not
+                    echo "🚀 Deploying or updating Azure Container Instance..."
                     sh '''
                         if az container show --name ${CONTAINER_NAME} --resource-group ${RESOURCE_GROUP} > /dev/null 2>&1; then
-                            echo "🔄 Container exists — updating image..."
+                            echo "🔄 Updating existing container..."
                             az container update \
                                 --name ${CONTAINER_NAME} \
                                 --resource-group ${RESOURCE_GROUP} \
                                 --image ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest
                             az container restart --name ${CONTAINER_NAME} --resource-group ${RESOURCE_GROUP}
                         else
-                            echo "🚀 Creating new Azure Container Instance..."
+                            echo "🆕 Creating new container..."
                             az container create \
                                 --resource-group ${RESOURCE_GROUP} \
                                 --name ${CONTAINER_NAME} \
