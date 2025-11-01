@@ -2,52 +2,63 @@ pipeline {
     agent any
 
     environment {
+        // ----- ACR Configuration -----
         ACR_NAME = 'aswathregistry'
         ACR_LOGIN_SERVER = 'aswathregistry.azurecr.io'
         IMAGE_NAME = 'demoapp'
+
+        // ----- Azure Configuration -----
         RESOURCE_GROUP = 'jenkins-rg'
         CONTAINER_NAME = 'demoapp-container'
         LOCATION = 'southindia'
-        DNS_NAME_LABEL = 'aswath-demoapp2004-v7'
+        DNS_NAME_LABEL = 'aswath-demoapp2004-final'
 
-        // Jenkins credentials
-        CREDS = credentials('azure-acr')    // ACR username/password
-        AZURE_SP = credentials('azure-sp')  // Azure Service Principal JSON
+        // ----- Jenkins Credentials -----
+        CREDS = credentials('azure-acr')     // ACR username/password stored in Jenkins
+        AZURE_SP = credentials('azure-sp')   // Azure Service Principal JSON stored in Jenkins
     }
 
     stages {
         stage('Checkout Code') {
             steps {
+                echo "📥 Checking out source code..."
                 git branch: 'main', url: 'https://github.com/Aswath-2004/ci-cd-aws-jenkins-demo.git'
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                script {
-                    echo "🛠️ Building Docker image..."
-                    sh "docker build -t ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest ."
+                echo "🐳 Building Docker image..."
+                sh "docker build -t ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest ."
+            }
+        }
+
+        stage('Login to ACR') {
+            steps {
+                echo "🔐 Logging into Azure Container Registry..."
+                withCredentials([usernamePassword(credentialsId: 'azure-acr', usernameVariable: 'USR', passwordVariable: 'PASS')]) {
+                    sh """
+                        echo \$PASS | docker login ${ACR_LOGIN_SERVER} -u \$USR --password-stdin
+                    """
                 }
             }
         }
 
         stage('Push Docker Image to ACR') {
             steps {
-                script {
-                    echo "📤 Pushing image to Azure Container Registry..."
-                    sh """
-                        echo ${CREDS_PSW} | docker login ${ACR_LOGIN_SERVER} -u ${CREDS_USR} --password-stdin
-                        docker push ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest
-                    """
-                }
+                echo "📤 Pushing Docker image to ACR..."
+                sh "docker push ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest"
             }
         }
 
         stage('Login to Azure using Service Principal') {
             steps {
+                echo "🔑 Logging into Azure..."
                 script {
-                    echo "🔐 Logging into Azure using Service Principal..."
+                    // Write service principal JSON to a temporary file
                     writeFile file: 'azure_sp.json', text: "${AZURE_SP}"
+
+                    // Login to Azure
                     sh '''
                         az login --service-principal \
                             --username $(jq -r .clientId azure_sp.json) \
@@ -60,33 +71,24 @@ pipeline {
             }
         }
 
-        stage('Deploy or Update Azure Container Instance') {
+        stage('Deploy to Azure Container Instance') {
             steps {
+                echo "🚀 Deploying container to Azure..."
                 script {
-                    echo "🚀 Deploying or updating Azure Container Instance..."
                     sh '''
-                        if az container show --name ${CONTAINER_NAME} --resource-group ${RESOURCE_GROUP} > /dev/null 2>&1; then
-                            echo "🔄 Updating existing container..."
-                            az container update \
-                                --name ${CONTAINER_NAME} \
-                                --resource-group ${RESOURCE_GROUP} \
-                                --image ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest
-                            az container restart --name ${CONTAINER_NAME} --resource-group ${RESOURCE_GROUP}
-                        else
-                            echo "🆕 Creating new container..."
-                            az container create \
-                                --resource-group ${RESOURCE_GROUP} \
-                                --name ${CONTAINER_NAME} \
-                                --image ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest \
-                                --cpu 1 --memory 1 \
-                                --registry-login-server ${ACR_LOGIN_SERVER} \
-                                --registry-username ${CREDS_USR} \
-                                --registry-password ${CREDS_PSW} \
-                                --dns-name-label ${DNS_NAME_LABEL} \
-                                --ports 80 \
-                                --location ${LOCATION} \
-                                --restart-policy Always
-                        fi
+                        az container create \
+                            --resource-group ${RESOURCE_GROUP} \
+                            --name ${CONTAINER_NAME} \
+                            --image ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest \
+                            --cpu 1 --memory 1 \
+                            --registry-login-server ${ACR_LOGIN_SERVER} \
+                            --registry-username ${CREDS_USR} \
+                            --registry-password ${CREDS_PSW} \
+                            --dns-name-label ${DNS_NAME_LABEL} \
+                            --ports 80 \
+                            --location ${LOCATION} \
+                            --restart-policy Always || \
+                        az container restart --resource-group ${RESOURCE_GROUP} --name ${CONTAINER_NAME}
                     '''
                 }
             }
@@ -96,10 +98,10 @@ pipeline {
     post {
         success {
             echo "✅ Deployment successful!"
-            echo "🌐 Access your app at: http://${DNS_NAME_LABEL}.${LOCATION}.azurecontainer.io"
+            echo "🌐 Your app is live at: http://${DNS_NAME_LABEL}.${LOCATION}.azurecontainer.io"
         }
         failure {
-            echo "❌ Deployment failed! Check Jenkins logs for details."
+            echo "❌ Deployment failed! Check the Jenkins console logs for details."
         }
     }
 }
