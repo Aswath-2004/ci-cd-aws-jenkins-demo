@@ -60,14 +60,13 @@ pipeline {
             }
         }
 
-        stage('Deploy or Update Azure Container Instance') {
+        stage('Deploy to Azure Container Instance') {
             steps {
                 script {
-                    // Try updating if exists, otherwise create new
                     sh """
-                        echo '🔍 Checking if container exists...'
+                        echo '🚀 Checking if container exists...'
                         if az container show --name ${CONTAINER_NAME} --resource-group ${RESOURCE_GROUP} > /dev/null 2>&1; then
-                            echo '🚀 Updating existing container...'
+                            echo '🔄 Updating existing container...'
                             az container delete --name ${CONTAINER_NAME} --resource-group ${RESOURCE_GROUP} --yes
                         else
                             echo '🆕 Creating new container...'
@@ -97,11 +96,11 @@ pipeline {
 
     post {
         success {
-            echo "✅ Deployment completed successfully!"
-            echo "🌐 Visit your app: http://${DNS_NAME_LABEL}.${LOCATION}.azurecontainer.io"
+            echo "✅ Deployment successful!"
+            echo "🌐 Access your app: http://${DNS_NAME_LABEL}.${LOCATION}.azurecontainer.io"
         }
         failure {
-            echo "❌ Deployment failed! Check logs for details."
+            echo "❌ Deployment failed! Check Jenkins logs for details."
         }
     }
 }
