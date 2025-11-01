@@ -2,19 +2,12 @@ pipeline {
     agent any
 
     environment {
-        // ACR & Azure Config
-        ACR_NAME = 'aswathregistry'
-        ACR_LOGIN_SERVER = 'aswathregistry.azurecr.io'
         IMAGE_NAME = 'demoapp'
+        ACR_NAME = 'aswathregistry'
         RESOURCE_GROUP = 'jenkins-rg'
         CONTAINER_NAME = 'demoapp-container'
         LOCATION = 'southindia'
-        DNS_NAME_LABEL = 'aswath-demoapp2004-v7'
-        PORT = '80'
-
-        // Jenkins credentials
-        CREDS = credentials('azure-acr')      // ACR username/password
-        AZURE_SP = credentials('azure-sp')    // Azure Service Principal JSON
+        DNS_LABEL = 'aswath-demoapp2004-v7'
     }
 
     stages {
@@ -27,35 +20,36 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    sh "docker build -t ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest ."
+                    sh 'docker build -t ${ACR_NAME}.azurecr.io/${IMAGE_NAME}:latest .'
                 }
             }
         }
 
         stage('Push to Azure Container Registry') {
             steps {
-                script {
-                    sh """
-                        echo ${CREDS_PSW} | docker login ${ACR_LOGIN_SERVER} -u ${CREDS_USR} --password-stdin
-                        docker push ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest
-                    """
+                withCredentials([usernamePassword(credentialsId: 'acr-credentials', usernameVariable: 'ACR_USER', passwordVariable: 'ACR_PASS')]) {
+                    script {
+                        sh """
+                        echo $ACR_PASS | docker login ${ACR_NAME}.azurecr.io -u $ACR_USER --password-stdin
+                        docker push ${ACR_NAME}.azurecr.io/${IMAGE_NAME}:latest
+                        """
+                    }
                 }
             }
         }
 
         stage('Login to Azure using Service Principal') {
             steps {
-                script {
-                    writeFile file: 'azure_sp.json', text: "${AZURE_SP}"
-
-                    sh '''
+                withCredentials([file(credentialsId: 'azure-sp', variable: 'AZURE_SP_FILE')]) {
+                    script {
+                        def sp = readJSON file: AZURE_SP_FILE
+                        sh """
                         az login --service-principal \
-                            --username $(jq -r .clientId azure_sp.json) \
-                            --password $(jq -r .clientSecret azure_sp.json) \
-                            --tenant $(jq -r .tenantId azure_sp.json)
-
-                        az account set --subscription $(jq -r .subscriptionId azure_sp.json)
-                    '''
+                            -u ${sp.clientId} \
+                            -p ${sp.clientSecret} \
+                            --tenant ${sp.tenantId}
+                        """
+                    }
                 }
             }
         }
@@ -64,30 +58,24 @@ pipeline {
             steps {
                 script {
                     sh """
-                        echo '🚀 Checking if container exists...'
-                        if az container show --name ${CONTAINER_NAME} --resource-group ${RESOURCE_GROUP} > /dev/null 2>&1; then
-                            echo '🔄 Updating existing container...'
-                            az container delete --name ${CONTAINER_NAME} --resource-group ${RESOURCE_GROUP} --yes
-                        else
-                            echo '🆕 Creating new container...'
-                        fi
-
-                        echo '📦 Deploying container to Azure...'
-                        az container create \
-                            --resource-group ${RESOURCE_GROUP} \
-                            --name ${CONTAINER_NAME} \
-                            --image ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest \
-                            --cpu 1 \
-                            --memory 1 \
-                            --registry-login-server ${ACR_LOGIN_SERVER} \
-                            --registry-username ${CREDS_USR} \
-                            --registry-password ${CREDS_PSW} \
-                            --os-type Linux \
-                            --restart-policy Always \
-                            --dns-name-label ${DNS_NAME_LABEL} \
-                            --location ${LOCATION} \
-                            --ip-address Public \
-                            --ports ${PORT}
+                    az container create \
+                      --resource-group ${RESOURCE_GROUP} \
+                      --name ${CONTAINER_NAME} \
+                      --image ${ACR_NAME}.azurecr.io/${IMAGE_NAME}:latest \
+                      --cpu 1 --memory 1 \
+                      --registry-login-server ${ACR_NAME}.azurecr.io \
+                      --registry-username ${ACR_NAME} \
+                      --registry-password "$(az acr credential show --name ${ACR_NAME} --query "passwords[0].value" -o tsv)" \
+                      --ports 80 \
+                      --os-type Linux \
+                      --restart-policy Always \
+                      --dns-name-label ${DNS_LABEL} \
+                      --location ${LOCATION} \
+                      --ip-address Public --query "{FQDN:ipAddress.fqdn, IP:ipAddress.ip}" -o table || \
+                      az container update \
+                      --resource-group ${RESOURCE_GROUP} \
+                      --name ${CONTAINER_NAME} \
+                      --image ${ACR_NAME}.azurecr.io/${IMAGE_NAME}:latest
                     """
                 }
             }
@@ -96,11 +84,10 @@ pipeline {
 
     post {
         success {
-            echo "✅ Deployment successful!"
-            echo "🌐 Access your app: http://${DNS_NAME_LABEL}.${LOCATION}.azurecontainer.io"
+            echo '✅ Deployment successful! Your app is live.'
         }
         failure {
-            echo "❌ Deployment failed! Check Jenkins logs for details."
+            echo '❌ Deployment failed! Check Jenkins logs for details.'
         }
     }
 }
