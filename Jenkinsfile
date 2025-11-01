@@ -61,23 +61,33 @@ pipeline {
             }
         }
 
-        stage('Deploy to Azure Container Instance') {
+        stage('Deploy or Update Azure Container Instance') {
             steps {
                 script {
+                    // This stage will update if ACI exists, or create a new one if not
                     sh '''
-                        az container create \
-                            --resource-group ${RESOURCE_GROUP} \
-                            --name ${CONTAINER_NAME} \
-                            --image ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest \
-                            --cpu 1 --memory 1 \
-                            --registry-login-server ${ACR_LOGIN_SERVER} \
-                            --registry-username ${CREDS_USR} \
-                            --registry-password ${CREDS_PSW} \
-                            --dns-name-label ${DNS_NAME_LABEL} \
-                            --ports 80 \
-                            --location ${LOCATION} \
-                            --restart-policy Always || \
-                        az container restart --resource-group ${RESOURCE_GROUP} --name ${CONTAINER_NAME}
+                        if az container show --name ${CONTAINER_NAME} --resource-group ${RESOURCE_GROUP} > /dev/null 2>&1; then
+                            echo "🔄 Container exists — updating image..."
+                            az container update \
+                                --name ${CONTAINER_NAME} \
+                                --resource-group ${RESOURCE_GROUP} \
+                                --image ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest
+                            az container restart --name ${CONTAINER_NAME} --resource-group ${RESOURCE_GROUP}
+                        else
+                            echo "🚀 Creating new Azure Container Instance..."
+                            az container create \
+                                --resource-group ${RESOURCE_GROUP} \
+                                --name ${CONTAINER_NAME} \
+                                --image ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest \
+                                --cpu 1 --memory 1 \
+                                --registry-login-server ${ACR_LOGIN_SERVER} \
+                                --registry-username ${CREDS_USR} \
+                                --registry-password ${CREDS_PSW} \
+                                --dns-name-label ${DNS_NAME_LABEL} \
+                                --ports 80 \
+                                --location ${LOCATION} \
+                                --restart-policy Always
+                        fi
                     '''
                 }
             }
@@ -87,7 +97,7 @@ pipeline {
     post {
         success {
             echo "✅ Deployment successful!"
-            echo "🌐 Access your app: http://${DNS_NAME_LABEL}.${LOCATION}.azurecontainer.io"
+            echo "🌐 Access your app at: http://${DNS_NAME_LABEL}.${LOCATION}.azurecontainer.io"
         }
         failure {
             echo "❌ Deployment failed! Check Jenkins logs for details."
