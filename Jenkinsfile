@@ -102,7 +102,7 @@ pipeline {
             echo "✅ Deployment successful! Your app is live at: http://${DNS_NAME_LABEL}.${LOCATION}.azurecontainer.io"
         }
         failure {
-            echo "❌ Deployment failed! Check Jenkins logs for details."
+            echo "❌ Deployment failed! Check Jenkins logs for details"
         }
     }
 }
