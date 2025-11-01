@@ -42,28 +42,25 @@ pipeline {
             }
         }
 
-        // 🔹 NEW: Azure Auto Deploy using Service Principal 🔹
         stage('Deploy to Azure') {
             steps {
                 withCredentials([string(credentialsId: 'azure-service-principal', variable: 'AZURE_CREDENTIALS')]) {
                     script {
-                        echo 'Logging into Azure and deploying latest image...'
+                        echo 'Deploying latest image to Azure Container Instance...'
 
-                        // Write the JSON creds to a temp file
+                        // Write JSON to file
                         writeFile file: 'azureAuth.json', text: "${AZURE_CREDENTIALS}"
 
-                        // Login to Azure using service principal
-                        sh """
+                        // Azure CLI Login and Deploy
+                        sh '''
                         az login --service-principal -u $(jq -r .clientId azureAuth.json) \
                                  -p $(jq -r .clientSecret azureAuth.json) \
                                  --tenant $(jq -r .tenantId azureAuth.json)
 
                         az account set --subscription $(jq -r .subscriptionId azureAuth.json)
 
-                        # Delete existing container if any
                         az container delete --name ${CONTAINER_NAME} --resource-group ${RESOURCE_GROUP} --yes || true
 
-                        # Deploy new container from ACR
                         az container create \
                             --resource-group ${RESOURCE_GROUP} \
                             --name ${CONTAINER_NAME} \
@@ -76,7 +73,7 @@ pipeline {
                             --dns-name-label ${DNS_NAME_LABEL} \
                             --ports 80 \
                             --location ${LOCATION}
-                        """
+                        '''
                     }
                 }
             }
