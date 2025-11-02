@@ -79,7 +79,16 @@ pipeline {
             steps {
                 script {
                     echo "🚀 Deploying container instance..."
+
+                    // Delete old container if it exists, to ensure new image runs
                     sh '''
+                    if az container show --resource-group ${RESOURCE_GROUP} --name ${CONTAINER_NAME} &>/dev/null; then
+                        echo "🧹 Deleting old container instance..."
+                        az container delete --resource-group ${RESOURCE_GROUP} --name ${CONTAINER_NAME} --yes
+                        sleep 10
+                    fi
+
+                    echo "🚀 Creating new container instance..."
                     az container create \
                         --resource-group ${RESOURCE_GROUP} \
                         --name ${CONTAINER_NAME} \
